@@ -197,8 +197,10 @@ def main():
     # training by using SubsetRandomSampler. Right now the train and validation
     # sets are built from the same indices - this is bad! Change it so that
     # the training and validation sets are disjoint and have the correct relative sizes.
-    subset_indices_train = range(len(train_dataset))
-    subset_indices_valid = range(len(train_dataset))
+    perm_inds = np.random.permutation(range(len(train_dataset)))
+    frac_valid = floor(len(train_dataset) * 0.15)
+    subset_indices_train = perm_inds[:frac_valid]
+    subset_indices_valid = perm_inds[frac_valid:]
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size,
