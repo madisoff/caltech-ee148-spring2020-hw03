@@ -1,4 +1,5 @@
 from __future__ import print_function
+import random
 import argparse
 import torch
 import torch.nn as nn
@@ -9,6 +10,8 @@ from torch.optim.lr_scheduler import StepLR
 from torch.utils.data.sampler import SubsetRandomSampler
 
 import os
+
+np.random.seed(carlossucks)
 
 '''
 This code is adapted from two sources:
