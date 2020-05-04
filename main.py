@@ -1,6 +1,7 @@
 from __future__ import print_function
 import random
 import argparse
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,7 +12,7 @@ from torch.utils.data.sampler import SubsetRandomSampler
 
 import os
 
-np.random.seed(carlossucks)
+np.random.seed(148)
 
 '''
 This code is adapted from two sources:
@@ -106,7 +107,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
         optimizer.step()                    # Perform a single optimization step
         if batch_idx % args.log_interval == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                epoch, batch_idx * len(data), len(train_loader.dataset),
+                epoch, batch_idx * len(data), len(train_loader.sampler),
                 100. * batch_idx / len(train_loader), loss.item()))
 
 
@@ -114,6 +115,7 @@ def test(model, device, test_loader):
     model.eval()    # Set the model to inference mode
     test_loss = 0
     correct = 0
+    test_num = 0
     with torch.no_grad():   # For the inference step, gradient is not computed
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
@@ -121,12 +123,13 @@ def test(model, device, test_loader):
             test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
             pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
+            test_num += len(data)
 
-    test_loss /= len(test_loader.dataset)
+    test_loss /= test_num
 
     print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
-        test_loss, correct, len(test_loader.dataset),
-        100. * correct / len(test_loader.dataset)))
+        test_loss, correct, test_num,
+        100. * correct / test_num))
 
 
 def main():
@@ -200,13 +203,18 @@ def main():
     # training by using SubsetRandomSampler. Right now the train and validation
     # sets are built from the same indices - this is bad! Change it so that
     # the training and validation sets are disjoint and have the correct relative sizes.
-    perm_inds = np.random.permutation(range(len(train_dataset)))
-    frac_valid = floor(len(train_dataset) * 0.15)
-    subset_indices_train = perm_inds[:frac_valid]
-    subset_indices_valid = perm_inds[frac_valid:]
+    subset_indices_train = np.empty((0), dtype=int)
+    subset_indices_valid = np.empty((0), dtype=int)
+
+    for i in range(10):
+        numclass = np.nonzero(train_dataset.targets == i)
+        perm_inds = np.random.permutation(range(len(numclass)))
+        frac_valid = int(np.floor(len(numclass) * 0.15))
+        subset_indices_train = np.append(perm_inds[frac_valid:],subset_indices_train)
+        subset_indices_valid = np.append(perm_inds[:frac_valid],subset_indices_valid)
 
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size,
+        train_dataset, batch_size=args.test_batch_size,
         sampler=SubsetRandomSampler(subset_indices_train)
     )
     val_loader = torch.utils.data.DataLoader(
