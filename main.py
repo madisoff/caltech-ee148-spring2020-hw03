@@ -198,6 +198,12 @@ def main():
                     transforms.ToTensor(),           # Add data augmentation here
                     transforms.Normalize((0.1307,), (0.3081,))
                 ]))
+    aug_train_dataset = datasets.MNIST('../data', train=True, download=True,
+                transform=transforms.Compose([       # Data preprocessing
+                    transforms.RandomAffine(10, translate=(0.05,0.05), scale=(0.9,1.1), shear=5),
+                    transforms.ToTensor(),           # Add data augmentation here
+                    transforms.Normalize((0.1307,), (0.3081,))
+                ]))
 
     # You can assign indices for training/validation or use a random subset for
     # training by using SubsetRandomSampler. Right now the train and validation
@@ -214,7 +220,7 @@ def main():
         subset_indices_valid = np.append(perm_inds[:frac_valid],subset_indices_valid)
 
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.test_batch_size,
+        aug_train_dataset, batch_size=args.test_batch_size,
         sampler=SubsetRandomSampler(subset_indices_train)
     )
     val_loader = torch.utils.data.DataLoader(
