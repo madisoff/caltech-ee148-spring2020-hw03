@@ -2,6 +2,7 @@ from __future__ import print_function
 import random
 import argparse
 import numpy as np
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,8 +11,7 @@ from torchvision import datasets, transforms
 from torchvision.utils import make_grid
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data.sampler import SubsetRandomSampler
-import matplotlib.pyplot as plt
-
+from sklearn.metrics import confusion_matrix
 import os
 
 np.random.seed(148)
@@ -89,10 +89,10 @@ class Net(nn.Module):
     '''
     def __init__(self):
         super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels=1, out_channels=10, kernel_size=(7,7), stride=1)
-        self.conv2 = nn.Conv2d(10, 32, 3, 1)
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=8, kernel_size=(5,5), stride=1)
+        self.conv2 = nn.Conv2d(8, 32, 3, 1)
         self.conv3 = nn.Conv2d(32, 64, 3, 1)
-        self.bn1 = nn.BatchNorm2d(10)
+        self.bn1 = nn.BatchNorm2d(8)
         self.bn2 = nn.BatchNorm2d(32)
         self.bn3 = nn.BatchNorm2d(64)
         self.fc1 = nn.Linear(64, 32)
@@ -147,6 +147,9 @@ def test(model, device, test_loader):
     test_loss = 0
     correct = 0
     test_num = 0
+    badimages = []
+    preds=torch.zeros(0,dtype=torch.long, device='cpu')
+    targets=torch.zeros(0,dtype=torch.long, device='cpu')
     with torch.no_grad():   # For the inference step, gradient is not computed
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
@@ -156,7 +159,23 @@ def test(model, device, test_loader):
             correct += pred.eq(target.view_as(pred)).sum().item()
             test_num += len(data)
 
+            # Failure image display code
+            for i in range(len(target)):
+                if pred[i]!=target[i]:
+                    badimages.append(data[i])
+
+            # Confusion Matrix code
+            preds=torch.cat([preds,pred.view(-1).cpu()])
+            targets=torch.cat([targets,target.view(-1).cpu()])
+
     test_loss /= test_num
+
+    # Failure image display code
+    img = make_grid(badimages, nrow=30)
+    plt.imshow(img.permute(1,2,0))
+
+    # Confusion matrix code
+    print(confusion_matrix(np.asarray(targets),np.asarray(preds)))
 
     print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
         test_loss, correct, test_num,
@@ -190,9 +209,10 @@ def main():
                         help='evaluate your model on the official test set')
     parser.add_argument('--load-model', type=str,
                         help='model file path')
-
     parser.add_argument('--save-model', action='store_true', default=True,
                         help='For Saving the current Model')
+    parser.add_argument('--testontrain', action='store_true', default=False,
+                        help='test your model on the training set')
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -210,19 +230,23 @@ def main():
         model = Net().to(device)
         model.load_state_dict(torch.load(args.load_model))
 
+        # Visualize the kernels
         kernels = model.conv1.weight.detach().clone()
         kernels = kernels - kernels.min()
         kernels = kernels / kernels.max()
-        img = make_grid(kernels, nrow=3)
-        plt.imshow(img.permute(1, 2, 0))
+        kerns = make_grid(kernels, nrow=3)
+        plt.imshow(kerns.permute(1, 2, 0))
         plt.show()
 
-        train_dataset = datasets.MNIST('../data', train=True, download=True,
+        # Select which dataset to test the model on
+        if args.testontrain:
+            test_dataset = datasets.MNIST('../data', train=True, download=True,
                     transform=transforms.Compose([       # Data preprocessing
                         transforms.ToTensor(),           # Add data augmentation here
                         transforms.Normalize((0.1307,), (0.3081,))
                     ]))
-        test_dataset = datasets.MNIST('../data', train=False,
+        else:
+            test_dataset = datasets.MNIST('../data', train=False,
                     transform=transforms.Compose([
                         transforms.ToTensor(),
                         transforms.Normalize((0.1307,), (0.3081,))
@@ -232,6 +256,9 @@ def main():
             test_dataset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
 
         test(model, device, test_loader)
+
+        # Display failure cases
+        plt.show()
 
         return
 
@@ -244,7 +271,7 @@ def main():
     # Load an augmented version of the dataset
     aug_train_dataset = datasets.MNIST('../data', train=True, download=True,
                 transform=transforms.Compose([       # Data preprocessing
-                    #transforms.RandomAffine(5, translate=(0.05,0.05), scale=(0.9,1.1), shear=5),
+                    transforms.RandomAffine(5, translate=(0.05,0.05), scale=(0.9,1.1), shear=5),
                     transforms.ToTensor(),           # Add data augmentation here
                     transforms.Normalize((0.1307,), (0.3081,))
                 ]))
@@ -256,6 +283,7 @@ def main():
     subset_indices_train = np.empty((0), dtype=int)
     subset_indices_valid = np.empty((0), dtype=int)
 
+    # Split the training set into training and validation sets classwise
     for i in range(10):
         numclass = np.nonzero(train_dataset.targets == i)
         perm_inds = np.random.permutation(range(len(numclass)))
@@ -264,7 +292,7 @@ def main():
         subset_indices_valid = np.append(perm_inds[:frac_valid],subset_indices_valid)
 
     train_loader = torch.utils.data.DataLoader(
-        aug_train_dataset, batch_size=args.test_batch_size,
+        train_dataset, batch_size=args.test_batch_size,
         sampler=SubsetRandomSampler(subset_indices_train)
     )
     val_loader = torch.utils.data.DataLoader(
