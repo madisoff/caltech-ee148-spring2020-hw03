@@ -3,6 +3,7 @@ import random
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,6 +13,8 @@ from torchvision.utils import make_grid
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data.sampler import SubsetRandomSampler
 from sklearn.metrics import confusion_matrix
+from sklearn.manifold import TSNE
+
 import os
 
 np.random.seed(148)
@@ -116,11 +119,11 @@ class Net(nn.Module):
 
         x = torch.flatten(x, 1)
         x = self.fc1(x)
-        x = F.relu(x)
-        x = self.fc2(x)
+        feats = F.relu(x)
+        x = self.fc2(feats)
 
         output = F.log_softmax(x, dim=1)
-        return output
+        return (output, feats)
 
 
 def train(args, model, device, train_loader, optimizer, epoch):
@@ -132,7 +135,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()               # Clear the gradient
-        output = model(data)                # Make predictions
+        output, feats = model(data)                # Make predictions
         loss = F.nll_loss(output, target)   # Compute loss
         loss.backward()                     # Gradient computation
         optimizer.step()                    # Perform a single optimization step
@@ -148,12 +151,12 @@ def test(model, device, test_loader):
     correct = 0
     test_num = 0
     badimages = []
-    preds=torch.zeros(0,dtype=torch.long, device='cpu')
-    targets=torch.zeros(0,dtype=torch.long, device='cpu')
+    preds = torch.zeros(0,dtype=torch.long, device='cpu')
+    targets = torch.zeros(0,dtype=torch.long, device='cpu')
     with torch.no_grad():   # For the inference step, gradient is not computed
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
-            output = model(data)
+            output, feats = model(data)
             test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
             pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
@@ -161,17 +164,27 @@ def test(model, device, test_loader):
 
             # Failure image display code
             for i in range(len(target)):
-                if pred[i]!=target[i]:
+                if pred[i] != target[i]:
                     badimages.append(data[i])
 
             # Confusion Matrix code
-            preds=torch.cat([preds,pred.view(-1).cpu()])
-            targets=torch.cat([targets,target.view(-1).cpu()])
+            preds = torch.cat([preds,pred.view(-1).cpu()])
+            targets = torch.cat([targets,target.view(-1).cpu()])
 
+            # TSNE Visualization
+            embedded_feats = TSNE(verbose=1).fit_transform(feats)
+            fig, ax = plt.subplots()
+            colors = cm.rainbow(np.linspace(0,1,10))
+            for i in range(len(embedded_feats)):
+                ax.scatter(embedded_feats[i,0],embedded_feats[i,1], label = target[i].item(), color= colors[int(target[i].item())])
+                ax.legend()
+                print(i)
+            print("done?")
     test_loss /= test_num
 
     # Failure image display code
     img = make_grid(badimages, nrow=30)
+    plt.figure()
     plt.imshow(img.permute(1,2,0))
 
     # Confusion matrix code
@@ -235,8 +248,8 @@ def main():
         kernels = kernels - kernels.min()
         kernels = kernels / kernels.max()
         kerns = make_grid(kernels, nrow=3)
+        plt.figure()
         plt.imshow(kerns.permute(1, 2, 0))
-        plt.show()
 
         # Select which dataset to test the model on
         if args.testontrain:
@@ -257,7 +270,6 @@ def main():
 
         test(model, device, test_loader)
 
-        # Display failure cases
         plt.show()
 
         return
