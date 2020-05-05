@@ -7,8 +7,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
+from torchvision.utils import make_grid
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data.sampler import SubsetRandomSampler
+import matplotlib.pyplot as plt
 
 import os
 
@@ -87,9 +89,38 @@ class Net(nn.Module):
     '''
     def __init__(self):
         super(Net, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=10, kernel_size=(7,7), stride=1)
+        self.conv2 = nn.Conv2d(10, 32, 3, 1)
+        self.conv3 = nn.Conv2d(32, 64, 3, 1)
+        self.bn1 = nn.BatchNorm2d(10)
+        self.bn2 = nn.BatchNorm2d(32)
+        self.bn3 = nn.BatchNorm2d(64)
+        self.fc1 = nn.Linear(64, 32)
+        self.fc2 = nn.Linear(32, 16)
 
     def forward(self, x):
-        return x
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = F.relu(x)
+        x = F.max_pool2d(x, 2)
+
+        x = self.conv2(x)
+        x = self.bn2(x)
+        x = F.relu(x)
+        x = F.max_pool2d(x, 2)
+
+        x = self.conv3(x)
+        x = self.bn3(x)
+        x = F.relu(x)
+        x = F.max_pool2d(x, 2)
+
+        x = torch.flatten(x, 1)
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+
+        output = F.log_softmax(x, dim=1)
+        return output
 
 
 def train(args, model, device, train_loader, optimizer, epoch):
@@ -176,9 +207,21 @@ def main():
         assert os.path.exists(args.load_model)
 
         # Set the test model
-        model = fcNet().to(device)
+        model = Net().to(device)
         model.load_state_dict(torch.load(args.load_model))
 
+        kernels = model.conv1.weight.detach().clone()
+        kernels = kernels - kernels.min()
+        kernels = kernels / kernels.max()
+        img = make_grid(kernels, nrow=3)
+        plt.imshow(img.permute(1, 2, 0))
+        plt.show()
+
+        train_dataset = datasets.MNIST('../data', train=True, download=True,
+                    transform=transforms.Compose([       # Data preprocessing
+                        transforms.ToTensor(),           # Add data augmentation here
+                        transforms.Normalize((0.1307,), (0.3081,))
+                    ]))
         test_dataset = datasets.MNIST('../data', train=False,
                     transform=transforms.Compose([
                         transforms.ToTensor(),
@@ -198,9 +241,10 @@ def main():
                     transforms.ToTensor(),           # Add data augmentation here
                     transforms.Normalize((0.1307,), (0.3081,))
                 ]))
+    # Load an augmented version of the dataset
     aug_train_dataset = datasets.MNIST('../data', train=True, download=True,
                 transform=transforms.Compose([       # Data preprocessing
-                    transforms.RandomAffine(10, translate=(0.05,0.05), scale=(0.9,1.1), shear=5),
+                    #transforms.RandomAffine(5, translate=(0.05,0.05), scale=(0.9,1.1), shear=5),
                     transforms.ToTensor(),           # Add data augmentation here
                     transforms.Normalize((0.1307,), (0.3081,))
                 ]))
@@ -215,7 +259,7 @@ def main():
     for i in range(10):
         numclass = np.nonzero(train_dataset.targets == i)
         perm_inds = np.random.permutation(range(len(numclass)))
-        frac_valid = int(np.floor(len(numclass) * 0.15))
+        frac_valid = int(np.floor(len(numclass) * 0))
         subset_indices_train = np.append(perm_inds[frac_valid:],subset_indices_train)
         subset_indices_valid = np.append(perm_inds[:frac_valid],subset_indices_valid)
 
@@ -229,7 +273,7 @@ def main():
     )
 
     # Load your model [fcNet, ConvNet, Net]
-    model = fcNet().to(device)
+    model = Net().to(device)
 
     # Try different optimzers here [Adam, SGD, RMSprop]
     optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
@@ -240,7 +284,7 @@ def main():
     # Training loop
     for epoch in range(1, args.epochs + 1):
         train(args, model, device, train_loader, optimizer, epoch)
-        test(model, device, val_loader)
+        # test(model, device, val_loader)
         scheduler.step()    # learning rate scheduler
 
         # You may optionally save your model at each epoch here
